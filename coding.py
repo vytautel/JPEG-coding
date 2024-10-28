@@ -31,8 +31,6 @@ def show_image(pixels: ndarray):
 	
 # Returns a generator that yields the R, G, and B channels of the image.
 def components(pixels: ndarray):
-    #print(pixels)
-    #print(pixels.shape)
     return (pixels[:, :, i] for i in range(3))
 
 # Clips values in the array to be within the range 0 to 255. 
@@ -281,7 +279,6 @@ def pad_block(block, block_size):
 
 # Full encoding for one channel (e.g., Y, Cb, Cr)
 # YCbCr to RGB → DCT + Quantization → Inverse Zigzag Scan → RLE Encoding → Huffman Encoding
-
 def compress_channel(quant_matrix, channel, block_size=8):
     height, width = channel.shape
     
@@ -301,11 +298,6 @@ def compress_channel(quant_matrix, channel, block_size=8):
             rle_list = run_length_encode(zigzag_list)
 
             compressed_data.extend(rle_list)
-            # Store the RLE-compressed block data
-           # compressed_data.extend(dct_block)
-    
-    # Get frequency counts for Huffman encoding
-    #compressed_data = [item[1] for item in compressed_data]
 
     # Extract the second element (the actual values) for frequency calculation
     values = [value for _, value in compressed_data]
@@ -316,7 +308,6 @@ def compress_channel(quant_matrix, channel, block_size=8):
 	# Example values of compressed_data: [(0, 14.0), (0, -5.0), (7, -1.0), (2, 1.0), (3, 1.0), (0, -6.0), (1, 1.0), (0, -1.0), (11, 1.0), (0, -1.0), (30, 0)]
 	# 1st value - number of consecutive zeros (or runs of similar values) before encountering a significant non-zero value.
     # 2nd value - This represents the non-zero coefficient encountered after the run of zeros, comes from the quantized DCT coefficients.
-    
     frequencies = Counter(np.array(compressed_data))
     
     # Build a Huffman tree based on the frequency counts
@@ -423,8 +414,6 @@ def decode(encoded_list, Q_list, block_size=8):
     for idx, (huffman_encoded_data, huffman_table) in enumerate(encoded_list):
         channel = huffman_encoded_data  # Get current channel to decode
         
-        #height, width = channel.shape
-        
         # Step 1: Huffman Decode
         channel = huffman_decode(channel, huffman_table)
         
@@ -435,7 +424,6 @@ def decode(encoded_list, Q_list, block_size=8):
             for j in range(0, width, block_size):
                 
                 block = channel[data_index:data_index + block_size ** 2]
-                #block = channel[i:i + block_size, j:j + block_size]
                 block = run_length_decode(block, block_size**2)
 
                 # Step 3: Inverse Zigzag Scan
@@ -532,19 +520,12 @@ Q = (QY, QC, QC)
 C = contruct_C(QY, B) # coefficient matrix C for DCT 
 
 # Encodes each channel using DCT and quantization matrices.
-#encoded = [compress_channel(channel, quant_matrix) for channel, quant_matrix in zip(subsampled, Q)]
-#encoded = (compress_channel(*p) for p in zip(Q, subsampled))
 encoded = [compress_channel(q, c) for q, c in zip(Q, subsampled)]
-#encoded = (encode_PRIMARY(*p) for p in zip(Q, subsampled))
 
 # After decoding all the channels (Y, Cb, and Cr), 
 # it stacks them back together along the third dimension using dstack.
 # The result is a full decoded image in the YCbCr color space.
-#decoded = dstack(tuple(decode_PRIMARY(*p) for p in zip(Q, encoded)))
-
 decoded = decode(encoded, Q)
-#decoded = dstack(tuple(decode(q, e) for q, e in zip(Q, encoded)))
-#decoded = dstack(tuple(decode(*p) for p in zip(Q, encoded)))
 
 # Converts the decoded YCbCr image back to the RGB color space using 
 # the YCbCr_to_rgb function. 
