@@ -264,7 +264,14 @@ def huffman_decode(encoded_string, huffman_table):
             decoded_symbols.append(decoded_symbol)
             current_bits = ""  # Reset current bits after a match
     
-    return decoded_symbols
+    # Ensure the decoded symbols are in (zero_count, value) tuple format
+    rle_decoded_symbols = []
+    for i in range(0, len(decoded_symbols) - 1, 2):
+        zero_count = decoded_symbols[i]
+        value = decoded_symbols[i + 1]
+        rle_decoded_symbols.append((zero_count, value))
+    
+    return rle_decoded_symbols
 
    # Pads the block to the specified block size (e.g., 8x8) using zeros.
 def pad_block(block, block_size):
@@ -291,37 +298,35 @@ def compress_channel(quant_matrix, channel, block_size=8):
             zigzag_list = zigzag_scan(block)
             
             # Apply run-length encoding (RLE) to the zigzag-ordered coefficients
-            #rle_list = run_length_encode(zigzag_list)
+            rle_list = run_length_encode(zigzag_list)
 
-            compressed_data.extend(zigzag_list)
+            compressed_data.extend(rle_list)
             # Store the RLE-compressed block data
            # compressed_data.extend(dct_block)
     
     # Get frequency counts for Huffman encoding
     #compressed_data = [item[1] for item in compressed_data]
+
     # Extract the second element (the actual values) for frequency calculation
-    #values = [value for _, value in compressed_data]
+    values = [value for _, value in compressed_data]
 
 	# Calculate frequencies of the values
-    #frequencies = Counter(array(values))
+    frequencies = Counter(array(values))
     
 	# Example values of compressed_data: [(0, 14.0), (0, -5.0), (7, -1.0), (2, 1.0), (3, 1.0), (0, -6.0), (1, 1.0), (0, -1.0), (11, 1.0), (0, -1.0), (30, 0)]
 	# 1st value - number of consecutive zeros (or runs of similar values) before encountering a significant non-zero value.
     # 2nd value - This represents the non-zero coefficient encountered after the run of zeros, comes from the quantized DCT coefficients.
     
-    #frequencies = Counter(compressed_data)
+    frequencies = Counter(np.array(compressed_data))
     
     # Build a Huffman tree based on the frequency counts
-    #huffman_table = build_huffman_tree(frequencies)
+    huffman_table = build_huffman_tree(frequencies)
     
     # Huffman encode the RLE-compressed data
-    #huffman_encoded = huffman_encode(compressed_data, huffman_table)
+    huffman_encoded = huffman_encode(compressed_data, huffman_table)
     
-   # print(huffman_encoded)
-   # return huffman_encoded, huffman_table
-
-    print(channel)
-    return channel, []
+    print(huffman_encoded)
+    return huffman_encoded, huffman_table
 
 # Discrete Cosine Transform (DCT)
 # C is the DCT coefficient matrix, block - image block
@@ -392,6 +397,7 @@ def run_length_decode(rle_list, block_size=64):
     
     for (zero_count, value) in rle_list:
         # Append the correct number of zeros followed by the non-zero value
+        zero_count = int(zero_count)
         decoded.extend([0] * zero_count)
         decoded.append(value)
     
@@ -417,10 +423,10 @@ def decode(encoded_list, Q_list, block_size=8):
     for idx, (huffman_encoded_data, huffman_table) in enumerate(encoded_list):
         channel = huffman_encoded_data  # Get current channel to decode
         
-        height, width = channel.shape
+        #height, width = channel.shape
         
         # Step 1: Huffman Decode
-        #channel = huffman_decode(channel, huffman_table)
+        channel = huffman_decode(channel, huffman_table)
         
         data_index = 0  # Initialize the index for RLE data
         
@@ -428,81 +434,24 @@ def decode(encoded_list, Q_list, block_size=8):
         for i in range(0, height, block_size):
             for j in range(0, width, block_size):
                 
+                block = channel[data_index:data_index + block_size ** 2]
                 #block = channel[i:i + block_size, j:j + block_size]
-                block = channel[i:i + block_size, j:j + block_size]
-                #rle_block = run_length_decode(rle_block, block_size**2)
+                block = run_length_decode(block, block_size**2)
 
                 # Step 3: Inverse Zigzag Scan
                 block = reverse_zigzag(block, block_size)
 
                 # Step 4: Assign decoded block back to channel
-                channel[i:i + block_size, j:j + block_size] = block
+                channels[idx][i:i + block_size, j:j + block_size] = block
                 
                 data_index += block_size ** 2
         
         # Step 5: Inverse Quantization and IDCT for the full channel
-        channels[idx] = decode_PRIMARY(Q_list[idx], channel)
+        channels[idx] = decode_PRIMARY(Q_list[idx], channels[idx])
         channels[idx] = np.clip(channels[idx], 0, 255)  # Clip values to valid pixel range (0-255)
 
     # Return the decoded Y, Cb, Cr channels
     return np.dstack((channels[0], channels[1], channels[2])).astype(np.float32)
-
-def decode2(Q, encoded_tuple, block_size=8):
-    
-    huffman_encoded_data, huffman_table = encoded_tuple
-    
-	# Step 1: Huffman Decode
-    rle_data = huffman_decode(huffman_encoded_data, huffman_table)
-    
-    # Initialize variables for decompressed image (assume size is known or passed)
-    height = 720  # original image height
-    width = 1280   # original image width
-    decompressed_channel = np.zeros((height, width), dtype=np.float32)
-    
-    data_index = 0
-    
-    # Step 2: Loop over image blocks to decode
-    for i in range(0, height, block_size):
-        for j in range(0, width, block_size):
-            rle_block = rle_data[data_index:data_index + block_size**2]
-            data_index += block_size**2
-            
-            # Inverse Zigzag Scan and Dequantization
-            dct_block = reverse_zigzag(rle_block, block_size)
-            dequantized_block = dct_block * Q
-            
-            # Inverse DCT to get the original block
-            spatial_block = idct(dequantized_block)
-            
-            # Place the block in the decompressed channel
-            decompressed_channel[i:i + block_size, j:j + block_size] = spatial_block
-    
-    return decompressed_channel
-
-    channel_array = channel[1]  # Assuming the second element is my 2D array
-
-    # Convert to a NumPy array and ensure float type
-    channel_array = np.array(channel_array, dtype=np.float64)
-
-    # Check the shape of the channel_array
-    if channel_array.shape != (8, 8):
-        # Reshape or pad the array to fit (8, 8) if needed
-        # Example of padding with zeros (adjust based on your actual data)
-        padded_array = np.zeros((8, 8), dtype=np.float64)
-        padded_array[:channel_array.shape[0], :channel_array.shape[1]] = channel_array
-        channel_array = padded_array
-        
-    # Dequantization step: multiply by the quantization matrix Q
-    dequantized_channel = channel_array * Q
-    
-    # Reverse zigzag (optional): If the channel was zigzagged, reverse it here
-    block_size = 8
-    reversed_zigzag_channel = reverse_zigzag(dequantized_channel, block_size)
-    
-    # Apply inverse DCT (IDCT) to each 8x8 block
-    idct_channel = apply_idct(reversed_zigzag_channel, block_size)
-    
-    return idct_channel
 
 # Peak Signal-to-Noise Ratio (PSNR). Measures quality of reconstruction. Higher PSNR values - better quality.
 def PSNR(rgb_pixels, decoded_pixels):
