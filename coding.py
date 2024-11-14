@@ -205,7 +205,7 @@ def reverse_zigzag(input, block_size = 8):
             print("Index error: make sure zigzag_index is properly defined.")
 
     return block
-	
+
 # Run-Length Encoding (RLE)
 def run_length_encode(zigzag_list):
     encoded = []
@@ -221,55 +221,75 @@ def run_length_encode(zigzag_list):
         encoded.append((count, 0))
     return encoded
 
-# Build a Huffman tree
-def build_huffman_tree(frequencies):
-    heap = [[weight, [symbol, ""]] for symbol, weight in frequencies.items()]
-    heapq.heapify(heap)
-    while len(heap) > 1:
-        lo = heapq.heappop(heap)
-        hi = heapq.heappop(heap)
-        for pair in lo[1:]:
-            pair[1] = '0' + pair[1]
-        for pair in hi[1:]:
-            pair[1] = '1' + pair[1]
-        heapq.heappush(heap, [lo[0] + hi[0]] + lo[1:] + hi[1:])
-    return sorted(heapq.heappop(heap)[1:], key=lambda p: (len(p[-1]), p))
+class HuffmanNode:
+    def __init__(self, symbol, frequency):
+        self.symbol = symbol
+        self.frequency = frequency
+        self.left = None
+        self.right = None
+    
+    # Define the less-than operator for heap sorting
+    def __lt__(self, other):
+        return self.frequency < other.frequency
 
-# Encode symbols using the Huffman code
-def huffman_encode(symbols, huffman_table):
-     # Create a dictionary from the Huffman table for easy lookup
-    huffman_dict = dict(huffman_table)
+def build_huffman_tree(frequencies):
+    # Step 1: Create a heap of Huffman nodes
+    heap = [HuffmanNode(symbol, freq) for symbol, freq in frequencies.items()]
+    heapq.heapify(heap)
     
-    # Encode only the second value (coefficient) of each (run_length, coefficient) pair
-    encoded_string = ''.join([huffman_dict[symbol[1]] for symbol in symbols])
+    # Step 2: Merge nodes until only one tree remains
+    while len(heap) > 1:
+        # Pop the two nodes with the lowest frequency
+        node1 = heapq.heappop(heap)
+        node2 = heapq.heappop(heap)
+        
+        # Create a new node with combined frequency
+        merged = HuffmanNode(None, node1.frequency + node2.frequency)
+        merged.left = node1
+        merged.right = node2
+        
+        # Push the merged node back into the heap
+        heapq.heappush(heap, merged)
     
-    return encoded_string
+    # The remaining node is the root of the Huffman tree
+    root = heap[0]
+    
+    # Step 3: Traverse the Huffman tree to generate codes
+    huffman_table = {}
+    def generate_codes(node, current_code=""):
+        if node is not None:
+            # If it's a leaf node, assign the current code to this symbol
+            if node.symbol is not None:
+                huffman_table[node.symbol] = current_code
+            # Traverse the left and right children, appending '0' and '1'
+            generate_codes(node.left, current_code + "0")
+            generate_codes(node.right, current_code + "1")
+    
+    generate_codes(root)
+    
+    return huffman_table
+
+def huffman_encode(data, huffman_table):    
+    encoded_data = ''.join(huffman_table[symbol] for symbol in data)
+    return encoded_data
 
 def huffman_decode(encoded_string, huffman_table):
-    # Invert the huffman_table to create a decoding dictionary (bit sequence -> symbol)
-    decoding_dict = {v: k for k, v in huffman_table}
+    # Step 1: Create the reverse Huffman table (map code to symbol)
+    reverse_huffman_table = {code: symbol for symbol, code in huffman_table.items()}
     
-    decoded_symbols = []
-    current_bits = ""
+    # Step 2: Decode the encoded string using the reverse table
+    decoded_data = []
+    current_code = ""
     
-    # Iterate through the encoded bit string
     for bit in encoded_string:
-        current_bits += bit
-        
-        # If the current bit sequence is in the decoding dictionary, decode it
-        if current_bits in decoding_dict:
-            decoded_symbol = decoding_dict[current_bits]
-            decoded_symbols.append(decoded_symbol)
-            current_bits = ""  # Reset current bits after a match
+        current_code += bit
+        # If the current code matches a symbol in the reverse table, add the symbol to the result
+        if current_code in reverse_huffman_table:
+            decoded_data.append(reverse_huffman_table[current_code])
+            current_code = ""  # Reset the current code
     
-    # Ensure the decoded symbols are in (zero_count, value) tuple format
-    rle_decoded_symbols = []
-    for i in range(0, len(decoded_symbols) - 1, 2):
-        zero_count = decoded_symbols[i]
-        value = decoded_symbols[i + 1]
-        rle_decoded_symbols.append((zero_count, value))
-    
-    return rle_decoded_symbols
+    # Return the decoded data as a list of symbols
+    return decoded_data
 
    # Pads the block to the specified block size (e.g., 8x8) using zeros.
 def pad_block(block, block_size):
@@ -279,6 +299,7 @@ def pad_block(block, block_size):
 
 # Full encoding for one channel (e.g., Y, Cb, Cr)
 # YCbCr to RGB → DCT + Quantization → Inverse Zigzag Scan → RLE Encoding → Huffman Encoding
+
 def compress_channel(quant_matrix, channel, block_size=8):
     height, width = channel.shape
     
@@ -292,23 +313,32 @@ def compress_channel(quant_matrix, channel, block_size=8):
             block = channel[i:i + block_size, j:j + block_size]
             
             # Apply zigzag scan to the DCT block
-            zigzag_list = zigzag_scan(block)
+            block = zigzag_scan(block)
             
             # Apply run-length encoding (RLE) to the zigzag-ordered coefficients
-            rle_list = run_length_encode(zigzag_list)
+            block = run_length_encode(block)
 
-            compressed_data.extend(rle_list)
+            compressed_data.extend(block)
+    
+    # Get frequency counts for Huffman encoding
+    frequencies = {}
 
-    # Extract the second element (the actual values) for frequency calculation
-    values = [value for _, value in compressed_data]
+    # Iterate over each (zero_run, value) pair in compressed_data
+    for item in compressed_data:
+        if item in frequencies:
+            frequencies[item] += 1
+        else:
+            frequencies[item] = 1
 
+    print("Frequencies:", frequencies)
+    
+    #values = np.array(compressed_data)
 	# Calculate frequencies of the values
-    frequencies = Counter(array(values))
+    #frequencies = Counter(values)
     
 	# Example values of compressed_data: [(0, 14.0), (0, -5.0), (7, -1.0), (2, 1.0), (3, 1.0), (0, -6.0), (1, 1.0), (0, -1.0), (11, 1.0), (0, -1.0), (30, 0)]
 	# 1st value - number of consecutive zeros (or runs of similar values) before encountering a significant non-zero value.
     # 2nd value - This represents the non-zero coefficient encountered after the run of zeros, comes from the quantized DCT coefficients.
-    frequencies = Counter(np.array(compressed_data))
     
     # Build a Huffman tree based on the frequency counts
     huffman_table = build_huffman_tree(frequencies)
@@ -340,10 +370,6 @@ def encode_PRIMARY(q, channel):
 				dct(channel[row:row+B, col:col+B]) / q)
 
 	return trans
-
-def encode_block(block, quant_matrix):    
-    quantized_block = round(dct(block) / quant_matrix)
-    return quantized_block
 
 # Inside the decode function, for each block of the image (row:row+B, col:col+B), 
 # it performs the inverse DCT (idct) to reconstruct the original image block. 
@@ -380,62 +406,63 @@ def apply_idct(image_channel, block_size):
 
     return reconstructed_channel
 
-def unpad_block(padded_block, original_shape):
-    return padded_block[:original_shape[0], :original_shape[1]]
-
-def run_length_decode(rle_list, block_size=64):
+def run_length_decode(rle_list):
     decoded = []
-    
-    for (zero_count, value) in rle_list:
-        # Append the correct number of zeros followed by the non-zero value
-        zero_count = int(zero_count)
-        decoded.extend([0] * zero_count)
-        decoded.append(value)
-    
-    # Ensure the decoded list has exactly block_size elements (e.g., 64 for an 8x8 block)
-    decoded = decoded[:block_size]  # Truncate if necessary
-    
+    for count, value in rle_list:
+        decoded.extend([0] * int(count))  # Add 'count' zeros
+        if value != 0:
+            decoded.append(value)      # Only add non-zero values
     return decoded
 
 # encoded_list - 3 tuples of values: huffman_encoded, huffman_tree
 # Huffman Decoding → RLE Decoding → Inverse Zigzag Scan → Inverse Quantization → Inverse DCT → YCbCr to RGB
 def decode(encoded_list, Q_list, block_size=8):
-    height = 720  # original image height
-    width = 1280  # original image width
+    heightC = 720  # original image height
+    widthC = 1280  # original image width
 
     # Initialize decompressed channels for Y, Cb, and Cr
-    decompressed_Y = np.zeros((height, width), dtype=np.float32)
-    decompressed_Cb = np.zeros((height, width), dtype=np.float32)
-    decompressed_Cr = np.zeros((height, width), dtype=np.float32)
+    decompressed_Y = np.zeros((heightC, widthC), dtype=np.float32)
+    decompressed_Cb = np.zeros((heightC, widthC), dtype=np.float32)
+    decompressed_Cr = np.zeros((heightC, widthC), dtype=np.float32)
 
     channels = [decompressed_Y, decompressed_Cb, decompressed_Cr]
     
     # Loop through the Y, Cb, and Cr channels
     for idx, (huffman_encoded_data, huffman_table) in enumerate(encoded_list):
-        channel = huffman_encoded_data  # Get current channel to decode
-        
+                
         # Step 1: Huffman Decode
-        channel = huffman_decode(channel, huffman_table)
+        channel = huffman_decode(huffman_encoded_data, huffman_table)
         
         data_index = 0  # Initialize the index for RLE data
-        
-        # Step 2: Loop over image blocks to decode RLE
-        for i in range(0, height, block_size):
-            for j in range(0, width, block_size):
-                
-                block = channel[data_index:data_index + block_size ** 2]
-                block = run_length_decode(block, block_size**2)
+        channel_decoded = np.zeros((heightC, widthC))
 
+        # Step 2: Loop over image blocks to decode RLE
+        rle_decoded = run_length_decode(channel)
+
+        for i in range(0, heightC, block_size):
+            for j in range(0, widthC , block_size):
+
+                block_1d = rle_decoded[data_index:data_index + block_size ** 2]
+
+                if len(block_1d) == block_size ** 2:
+                    # Perform reverse zigzag scan to get the 2D block
+                    block_2d = reverse_zigzag(block_1d, block_size)
+                
+                    # Assign the decoded block back to the appropriate position in `channel_decoded`
+                    try:
+                        channel_decoded[i:i + block_size, j:j + block_size] = block_2d
+                    except:
+                         print("end")
                 # Step 3: Inverse Zigzag Scan
-                block = reverse_zigzag(block, block_size)
+                #block = reverse_zigzag(block, block_size)
 
                 # Step 4: Assign decoded block back to channel
-                channels[idx][i:i + block_size, j:j + block_size] = block
+                #channel_decoded[i:i + block_size, j:j + block_size] = block
                 
                 data_index += block_size ** 2
-        
+
         # Step 5: Inverse Quantization and IDCT for the full channel
-        channels[idx] = decode_PRIMARY(Q_list[idx], channels[idx])
+        channels[idx] = decode_PRIMARY(Q_list[idx], channel_decoded)
         channels[idx] = np.clip(channels[idx], 0, 255)  # Clip values to valid pixel range (0-255)
 
     # Return the decoded Y, Cb, Cr channels
@@ -450,14 +477,6 @@ def PSNR(rgb_pixels, decoded_pixels):
 	else:
 		psnr = 10 * math.log10((255 ** 2) / mse)
 	return psnr
-
-# Compression Ratio
-def CR (rgb_pixels, output_filename):
-	original_size = rgb_pixels.nbytes  # Size of original image
-	compressed_size = os.path.getsize(output_filename)   # Size of compressed image
-	
-	CR = original_size / compressed_size
-	return CR
 
 def checkDetail(rgb_pixels): 
 	# Convert the RGB image to grayscale
@@ -476,6 +495,7 @@ input_filename = "ocean 1280x720.jpg"
 output_filename = "compressed_image.jpeg"
 
 rgb_pixels = plt.imread(input_filename) # loads an image from a file into a NumPy array (rgb_pixels). The image is read in RGB format.
+original_size_b = rgb_pixels.nbytes 
 #checkDetail(rgb_pixels)
 
 dimensions = rgb_pixels.shape[:-1] # Extracts the dimensions of the image excluding the color channels. shape returns a tuple where the last value is the number of channels.
@@ -521,11 +541,16 @@ C = contruct_C(QY, B) # coefficient matrix C for DCT
 
 # Encodes each channel using DCT and quantization matrices.
 encoded = [compress_channel(q, c) for q, c in zip(Q, subsampled)]
+#encoded = (encode_PRIMARY(*p) for p in zip(Q, subsampled))
 
 # After decoding all the channels (Y, Cb, and Cr), 
 # it stacks them back together along the third dimension using dstack.
 # The result is a full decoded image in the YCbCr color space.
+#decoded = dstack(tuple(decode_PRIMARY(*p) for p in zip(Q, encoded)))
+
 decoded = decode(encoded, Q)
+#decoded = dstack(tuple(decode(q, e) for q, e in zip(Q, encoded)))
+#decoded = dstack(tuple(decode(*p) for p in zip(Q, encoded)))
 
 # Converts the decoded YCbCr image back to the RGB color space using 
 # the YCbCr_to_rgb function. 
@@ -554,7 +579,7 @@ PSNR1 = PSNR(rgb_pixels, decoded_pixels)
 print("PSNR: ", PSNR1)
 
 # Compression Ratio
-CR = CR(rgb_pixels, output_filename)
+compressed_size_b = os.path.getsize(output_filename)   # Size of compressed image
+CR = original_size_b / compressed_size_b
 print("CR: ", CR)
 
-# %%
